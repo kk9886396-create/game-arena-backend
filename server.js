@@ -7,6 +7,8 @@ function code(){let c;do{c=crypto.randomBytes(3).toString("hex").toUpperCase()}w
 function view(r){return {code:r.code,players:r.players.map((p,i)=>({name:p.name,color:colors[i],connected:p.connected})),state:r.state}}
 function emit(r){io.to(r.code).emit("room:update",view(r))}
 io.on("connection",s=>{
+ console.log("PLAYER CONNECTED:",s.id);
+ s.on("room:create",()=>console.log("ROOM CREATE REQUEST:",s.id));
  s.on("player:register",(d,a=()=>{})=>{let name=String(d?.name||"").trim().slice(0,24);if(name.length<2)return a({ok:false,error:"नाम कम से कम 2 अक्षर का हो"});sessions.set(s.id,{name,room:null});a({ok:true,name})});
  s.on("room:create",(_,a=()=>{})=>{let u=sessions.get(s.id);if(!u)return a({ok:false,error:"पहले नाम दर्ज करें"});if(u.room)return a({ok:false,error:"आप पहले से रूम में हैं"});let c=code(),r={code:c,players:[{id:s.id,name:u.name,connected:true}],state:{turn:0,dice:null,winner:null,pawns:{red:[-1,-1,-1,-1],green:[-1,-1,-1,-1]},message:"लाल खिलाड़ी पहले चलेगा"}};rooms.set(c,r);u.room=c;s.join(c);a({ok:true,room:view(r)});emit(r)});
  s.on("room:join",(d,a=()=>{})=>{let u=sessions.get(s.id),r=rooms.get(String(d?.code||"").toUpperCase());if(!u)return a({ok:false,error:"पहले नाम दर्ज करें"});if(!r)return a({ok:false,error:"रूम नहीं मिला"});if(r.players.length>1)return a({ok:false,error:"रूम भरा हुआ है"});if(u.room)return a({ok:false,error:"आप पहले से रूम में हैं"});r.players.push({id:s.id,name:u.name,connected:true});u.room=r.code;s.join(r.code);r.state.message="दोनों खिलाड़ी जुड़ गए।";a({ok:true,room:view(r)});emit(r)});
