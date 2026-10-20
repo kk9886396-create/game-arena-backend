@@ -13,4 +13,12 @@ async function getWallet(token) {
   return result.rows[0] || { balance: "0" };
 }
 
-module.exports = { initWalletDB, getWallet };
+async function getWalletTransactions(token) {
+  const result = await pool.query(
+    "SELECT id, amount, type, status, reference, created_at AS \"createdAt\" FROM wallet_transactions WHERE resume_token = $1 ORDER BY id DESC LIMIT 50",
+    [token]
+  );
+  return result.rows;
+}
+
+module.exports = { initWalletDB, getWallet, getWalletTransactions };

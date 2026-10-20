@@ -6,9 +6,10 @@ const waiting=[];
 const { nextPosition } = require("./ludo-rules");
 const { makePlayerId, makeReferralCode } = require("./profile-feature");
 const { initProfileDB, saveProfile, getProfile } = require("./profile-db");
-const { initWalletDB, getWallet } = require("./wallet-db");
+const { initWalletDB, getWallet, getWalletTransactions } = require("./wallet-db");
 app.use(express.json());app.use(express.static("public"));app.get("/api/health",(_,r)=>r.json({ok:true,rooms:rooms.size}));
 app.get("/api/wallet",async(req,res)=>{const token=req.get("X-Resume-Token");if(!token||!/^[a-f0-9]{64}$/.test(token))return res.status(401).json({ok:false,error:"Invalid token"});try{const profile=await getProfile(token);if(!profile)return res.status(401).json({ok:false,error:"Profile not found"});const wallet=await getWallet(token);return res.json({ok:true,balance:String(wallet.balance)});}catch(e){console.error("Wallet API error:",e.message);return res.status(500).json({ok:false,error:"Wallet unavailable"});}});
+app.get("/api/wallet/transactions",async(req,res)=>{const token=req.get("X-Resume-Token");if(!token||!/^[a-f0-9]{64}$/.test(token))return res.status(401).json({ok:false,error:"Invalid token"});try{const profile=await getProfile(token);if(!profile)return res.status(401).json({ok:false,error:"Profile not found"});const transactions=await getWalletTransactions(token);return res.json({ok:true,transactions});}catch(e){console.error("Wallet history API error:",e.message);return res.status(500).json({ok:false,error:"Wallet history unavailable"});}});
 function code(){let c;do{c=crypto.randomBytes(3).toString("hex").toUpperCase()}while(rooms.has(c));return c}
 function view(r){return {code:r.code,players:r.players.map((p,i)=>({name:p.name,color:colors[i],connected:p.connected})),state:r.state}}
 function emit(r){io.to(r.code).emit("room:update",view(r))}
