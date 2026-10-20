@@ -9,6 +9,7 @@ function code(){let c;do{c=crypto.randomBytes(3).toString("hex").toUpperCase()}w
 function view(r){return {code:r.code,players:r.players.map((p,i)=>({name:p.name,color:colors[i],connected:p.connected})),state:r.state}}
 function emit(r){io.to(r.code).emit("room:update",view(r))}
 const autoTurn=require("./auto-turn")(io,rooms,colors,emit);
+require("./open-battles-new")(io,sessions,rooms,colors,code,view,emit,autoTurn);
 io.on("connection",s=>{
  console.log("PLAYER CONNECTED:",s.id);
  require("./auto-match")(s,io,sessions,rooms,waiting,colors,code,view,emit,autoTurn.start);
