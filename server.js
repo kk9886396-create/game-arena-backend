@@ -6,7 +6,9 @@ const waiting=[];
 const { nextPosition } = require("./ludo-rules");
 const { makePlayerId, makeReferralCode } = require("./profile-feature");
 const { initProfileDB, saveProfile, getProfile } = require("./profile-db");
-app.use(express.static("public"));app.get("/api/health",(_,r)=>r.json({ok:true,rooms:rooms.size}));
+const { initWalletDB, getWallet } = require("./wallet-db");
+app.use(express.json());app.use(express.static("public"));app.get("/api/health",(_,r)=>r.json({ok:true,rooms:rooms.size}));
+app.get("/api/wallet",async(req,res)=>{const token=req.get("X-Resume-Token");if(!token||!/^[a-f0-9]{64}$/.test(token))return res.status(401).json({ok:false,error:"Invalid token"});try{const profile=await getProfile(token);if(!profile)return res.status(401).json({ok:false,error:"Profile not found"});const wallet=await getWallet(token);return res.json({ok:true,balance:String(wallet.balance)});}catch(e){console.error("Wallet API error:",e.message);return res.status(500).json({ok:false,error:"Wallet unavailable"});}});
 function code(){let c;do{c=crypto.randomBytes(3).toString("hex").toUpperCase()}while(rooms.has(c));return c}
 function view(r){return {code:r.code,players:r.players.map((p,i)=>({name:p.name,color:colors[i],connected:p.connected})),state:r.state}}
 function emit(r){io.to(r.code).emit("room:update",view(r))}
@@ -23,4 +25,4 @@ io.on("connection",s=>{
  s.on("game:move",(d,a=()=>{})=>{let u=sessions.get(s.id),r=u&&rooms.get(u.room);if(!r||r.players.length!==2)return a({ok:false,error:"रूम उपलब्ध नहीं"});let st=r.state,i=r.players.findIndex(p=>p.id===s.id),c=colors[i],p=Number(d?.pawn);if(i!==st.turn)return a({ok:false,error:"अभी आपकी बारी नहीं"});if(st.dice===null)return a({ok:false,error:"पहले पासा चलाएँ"});if(!Number.isInteger(p)||p<0||p>3)return a({ok:false,error:"गोटी चुनें"});let pos=st.pawns[c][p],rule=nextPosition(pos,st.dice);if(!rule.ok)return a({ok:false,error:rule.error});let n=rule.next;if(n<0)return a({ok:false,error:"गोटी निकालने के लिए 6 चाहिए"});if(n>52)return a({ok:false,error:"घर तक पहुँचने के लिए सही अंक चाहिए"});st.pawns[c][p]=n;let die=st.dice;st.dice=null;if(st.pawns[c].every(x=>x===52)){st.winner=c;st.message=c+" खिलाड़ी जीत गया"}else{st.message=c+" ने गोटी "+(p+1)+" चलाई";if(die!==6)st.turn=1-st.turn}emit(r);autoTurn.start(r);a({ok:true})});
  s.on("disconnect",()=>{let u=sessions.get(s.id),r=u&&rooms.get(u.room);if(r){let p=r.players.find(x=>x.id===s.id);if(p)p.connected=false;r.state.message=u.name+" डिस्कनेक्ट हुआ";emit(r)}for(let i=waiting.length-1;i>=0;i--)if(waiting[i]===s.id)waiting.splice(i,1);sessions.delete(s.id)});
 });
-if(process.env.DATABASE_URL){initProfileDB().then(()=>server.listen(PORT,"0.0.0.0",()=>console.log("Game Arena server ready"))).catch(err=>{console.error("Profile DB init failed:",err.message);process.exit(1)})}else{server.listen(PORT,"0.0.0.0",()=>console.log("Game Arena: http://localhost:"+PORT))}
+if(process.env.DATABASE_URL){initProfileDB().then(()=>initWalletDB()).then(()=>server.listen(PORT,"0.0.0.0",()=>console.log("Game Arena server ready"))).catch(err=>{console.error("Profile DB init failed:",err.message);process.exit(1)})}else{server.listen(PORT,"0.0.0.0",()=>console.log("Game Arena: http://localhost:"+PORT))}
