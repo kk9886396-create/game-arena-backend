@@ -1,1 +1,1 @@
-{"name":"game-arena","version":"0.1.0","private":true,"main":"server.js","scripts":{"start":"node server.js"},"engines":{"node":">=20"},"dependencies":{"express":"^4.21.2","socket.io":"^4.8.1"},"devDependencies":{"socket.io-client":"^4.8.4"}}
+{"name":"game-arena","version":"0.1.0","private":true,"main":"server.js","scripts":{"start":"node server.js"},"engines":{"node":">=20"},"dependencies":{"express":"^4.21.2","pg":"^8.23.1","socket.io":"^4.8.1"},"devDependencies":{"socket.io-client":"^4.8.4"}}
