@@ -6,10 +6,23 @@ const waiting=[];
 const { nextPosition } = require("./ludo-rules");
 const { makePlayerId, makeReferralCode } = require("./profile-feature");
 const { initProfileDB, saveProfile, getProfile } = require("./profile-db");
-const { initWalletDB, getWallet, getWalletTransactions } = require("./wallet-db");
+const { initWalletDB, getWallet, getWalletTransactions, createPaymentRequest, getPendingPayments, reviewPayment } = require("./wallet-db");
 app.use(express.json());app.use(express.static("public"));app.get("/api/health",(_,r)=>r.json({ok:true,rooms:rooms.size}));
+require("./admin-routes")(app, { getPendingPayments, reviewPayment });
 app.get("/api/wallet",async(req,res)=>{const token=req.get("X-Resume-Token");if(!token||!/^[a-f0-9]{64}$/.test(token))return res.status(401).json({ok:false,error:"Invalid token"});try{const profile=await getProfile(token);if(!profile)return res.status(401).json({ok:false,error:"Profile not found"});const wallet=await getWallet(token);return res.json({ok:true,balance:String(wallet.balance)});}catch(e){console.error("Wallet API error:",e.message);return res.status(500).json({ok:false,error:"Wallet unavailable"});}});
 app.get("/api/wallet/transactions",async(req,res)=>{const token=req.get("X-Resume-Token");if(!token||!/^[a-f0-9]{64}$/.test(token))return res.status(401).json({ok:false,error:"Invalid token"});try{const profile=await getProfile(token);if(!profile)return res.status(401).json({ok:false,error:"Profile not found"});const transactions=await getWalletTransactions(token);return res.json({ok:true,transactions});}catch(e){console.error("Wallet history API error:",e.message);return res.status(500).json({ok:false,error:"Wallet history unavailable"});}});
+app.post("/api/wallet/payment-request",async(req,res)=>{
+const token=req.get("X-Resume-Token");
+if(!token||!/^[a-f0-9]{64}$/.test(token))return res.status(401).json({ok:false,error:"Invalid token"});
+const amount=Number(req.body?.amount),utr=String(req.body?.utr||"").trim();
+if(!Number.isSafeInteger(amount)||amount<1||amount>50000)return res.status(400).json({ok:false,error:"Invalid amount"});
+if(!/^[a-zA-Z0-9-]{8,24}$/.test(utr))return res.status(400).json({ok:false,error:"Invalid UTR"});
+try{
+if(!await getProfile(token))return res.status(401).json({ok:false,error:"Profile not found"});
+const request=await createPaymentRequest(token,amount,utr);
+return res.status(201).json({ok:true,request});
+}catch(e){console.error("Payment request error:",e.message);return res.status(500).json({ok:false,error:"Payment request unavailable"})}
+});
 function code(){let c;do{c=crypto.randomBytes(3).toString("hex").toUpperCase()}while(rooms.has(c));return c}
 function view(r){return {code:r.code,players:r.players.map((p,i)=>({name:p.name,color:colors[i],connected:p.connected})),state:r.state}}
 function emit(r){io.to(r.code).emit("room:update",view(r))}
