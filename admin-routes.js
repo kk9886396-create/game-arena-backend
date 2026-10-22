@@ -4,7 +4,7 @@ const crypto = require("crypto");
 
 module.exports = function (
   app,
-  { getPendingPayments, reviewPayment, getPendingWithdrawals, getApprovedWithdrawals, reviewWithdrawal, markWithdrawalPaid, sendWithdrawalMessage }
+  { getPendingPayments, reviewPayment, getPendingWithdrawals, getApprovedWithdrawals, reviewWithdrawal, markWithdrawalPaid, sendWithdrawalMessage, io }
 ) {
   function requireAdmin(req, res, next) {
     const expected = process.env.ADMIN_TOKEN;
@@ -133,6 +133,17 @@ module.exports = function (
       }
       return res.status(500).json({ ok: false, error: "Unable to send withdrawal message" });
     }
+  });
+
+
+  app.post("/api/admin/notifications", requireAdmin, (req, res) => {
+    const message = String(req.body?.message || "").trim();
+    if (!message || message.length > 500) {
+      return res.status(400).json({ ok: false, error: "Message must be 1-500 characters" });
+    }
+    const notification = { message, sentAt: new Date().toISOString() };
+    io.emit("notification:broadcast", notification);
+    return res.json({ ok: true, deliveredTo: io.engine.clientsCount });
   });
 
 };
