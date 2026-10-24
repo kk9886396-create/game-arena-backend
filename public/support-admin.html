@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Game Arena - Support Admin</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;padding:16px;font:16px system-ui;background:#101426;color:#f5f6ff}
+main{max-width:900px;margin:auto}
+.panel{background:#1b2340;border:1px solid #394568;border-radius:14px;padding:16px;margin:12px 0}
+input,textarea,button{font:inherit;padding:11px;border-radius:8px;border:1px solid #65739a}
+input,textarea{width:100%;background:#101426;color:white;margin:5px 0 10px}
+button{cursor:pointer;background:#ffc857;color:#171717;font-weight:700;margin:4px 3px 4px 0}
+button.secondary{background:#dbe4ff}
+button.danger{background:#ffb4ab}
+.small{color:#c3cbe2;font-size:14px}
+#status{white-space:pre-wrap}
+.chat{padding:12px;margin:8px 0;background:#101426;border-radius:8px;overflow-wrap:anywhere}
+.chat.player{border-left:4px solid #79b8ff}
+.chat.admin{border-left:4px solid #ffc857}
+.item{padding:12px;border-bottom:1px solid #394568}
+.item button{display:block}
+</style>
+</head>
+<body>
+<main>
+<h1>🎧 Support Admin</h1>
+<p class="small">केवल अधिकृत एडमिन के लिए। यह पेज टोकन को स्थायी रूप से सेव नहीं करता। HTTPS पर ही इस्तेमाल करें।</p>
+<section class="panel">
+<label for="token">Admin Token</label>
+<input id="token" type="password" autocomplete="off" placeholder="अपना ADMIN_TOKEN दर्ज करें">
+<button id="connect">सुरक्षित रूप से कनेक्ट करें</button>
+<button id="logout" class="secondary">टोकन साफ़ करें</button>
+<p id="status" role="status">कनेक्ट करने के लिए एडमिन टोकन दर्ज करें।</p>
+</section>
+<section class="panel">
+<h2>शिकायतें</h2>
+<button id="refresh" class="secondary">सूची रिफ्रेश करें</button>
+<div id="list"></div>
+</section>
+<section class="panel" id="conversation" hidden>
+<h2 id="chatTitle">बातचीत</h2>
+<div id="messages"></div>
+<label for="reply">जवाब</label>
+<textarea id="reply" maxlength="1000" rows="3" placeholder="खिलाड़ी को जवाब लिखें"></textarea>
+<p id="chatStatus" role="status"></p>
+<button id="toggleStatus" class="secondary">शिकायत बंद करें</button>
+<button id="send">जवाब भेजें</button>
+<button id="delete" class="danger">पूरी चैट हटाएँ</button>
+</section>
+</main>
+<script>
+(function(){
+"use strict";
+const $=id=>document.getElementById(id);
+let activeChat=null,activeStatus="open",busy=false;
+function setStatus(s){$("status").textContent=s}
+function headers(json){const h={"X-Admin-Token":$("token").value.trim()};if(json)h["Content-Type"]="application/json";return h}
+async function api(path,options={}){
+ const response=await fetch(path,{...options,headers:{...headers(!!options.body),...(options.headers||{})},cache:"no-store"});
+ let data={};try{data=await response.json()}catch(_){}
+ if(!response.ok)throw new Error(data.error||("HTTP "+response.status));
+ return data;
+}
+function safeText(v){return v==null?"":String(v)}
+async function loadList(){
+ if(busy)return;busy=true;
+ try{
+  const data=await api("/api/admin/support-chats");
+  $("list").replaceChildren();
+  if(!data.chats||!data.chats.length){$("list").textContent="अभी कोई शिकायत नहीं है।";return}
+  data.chats.forEach(chat=>{
+   const item=document.createElement("div");item.className="item";
+   const info=document.createElement("div");
+   info.textContent=(chat.playerName||"खिलाड़ी")+" · ID "+chat.id+" · "+(chat.status==="closed"?"बंद":"खुली")+" · नए संदेश: "+(chat.unseenCount||0);
+   const last=document.createElement("p");last.className="small";last.textContent=safeText(chat.lastMessage);
+   const open=document.createElement("button");open.className="secondary";open.textContent="बातचीत खोलें";open.addEventListener("click",()=>loadChat(chat.id));
+   item.append(info,last,open);$("list").append(item);
+  });
+  setStatus("शिकायतों की सूची अपडेट हो गई।");
+ }catch(e){setStatus("सूची नहीं खुली: "+e.message)}
+ finally{busy=false}
+}
+async function loadChat(id){
+ try{
+  const data=await api("/api/admin/support-chats/"+encodeURIComponent(id));
+  activeChat=String(id);activeStatus=data.chat.status||"open";$("conversation").hidden=false;$("chatStatus").textContent=activeStatus==="closed"?"स्थिति: बंद":"स्थिति: खुली";$("toggleStatus").textContent=activeStatus==="closed"?"शिकायत दोबारा खोलें":"शिकायत बंद करें";$("send").disabled=activeStatus!=="open";$("reply").disabled=activeStatus!=="open";
+  $("chatTitle").textContent="बातचीत · "+(data.chat.playerName||"खिलाड़ी")+" · ID "+id;
+  $("messages").replaceChildren();
+  (data.chat.messages||[]).forEach(m=>{
+   const box=document.createElement("div");box.className="chat "+(m.sender==="admin"?"admin":"player");
+   const who=document.createElement("strong");who.textContent=m.sender==="admin"?"आपका जवाब":"खिलाड़ी";
+   const body=document.createElement("p");body.textContent=safeText(m.message);
+   const time=document.createElement("small");time.className="small";
+   time.textContent=m.createdAt?new Date(m.createdAt).toLocaleString():"";
+   box.append(who,body,time);$("messages").append(box);
+  });
+  setStatus("बातचीत खुल गई। संदेश पढ़ने से वे डिलीट नहीं होते।");
+  $("conversation").scrollIntoView({behavior:"smooth",block:"start"});
+  await loadList();
+ }catch(e){setStatus("बातचीत नहीं खुली: "+e.message)}
+}
+$("connect").addEventListener("click",async()=>{
+ if(!$("token").value.trim()){setStatus("पहले Admin Token दर्ज करें।");return}
+ await loadList();
+});
+$("refresh").addEventListener("click",loadList);
+ document.addEventListener("visibilitychange",()=>{if(!document.hidden&&$("token").value.trim())loadList()});
+ setInterval(async()=>{if(document.hidden||!$("token").value.trim())return;if(activeChat)await loadChat(activeChat);else await loadList()},5000);
+$("logout").addEventListener("click",()=>{
+ $("token").value="";activeChat=null;$("list").replaceChildren();$("messages").replaceChildren();
+ $("conversation").hidden=true;setStatus("टोकन साफ़ कर दिया गया।");
+});
+$("send").addEventListener("click",async()=>{
+ if(!activeChat)return setStatus("पहले बातचीत खोलें।");
+ if(activeStatus!=="open")return setStatus("बंद शिकायत पर जवाब नहीं भेज सकते। पहले दोबारा खोलें।");
+ const message=$("reply").value.trim();
+ if(!message||message.length>1000)return setStatus("जवाब 1 से 1000 अक्षरों का होना चाहिए।");
+ try{
+  await api("/api/admin/support-chats/"+encodeURIComponent(activeChat)+"/messages",{method:"POST",body:JSON.stringify({message})});
+  $("reply").value="";await loadChat(activeChat);setStatus("जवाब सेव हो गया।");
+ }catch(e){setStatus("जवाब नहीं भेजा गया: "+e.message)}
+});
+$("toggleStatus").addEventListener("click",async()=>{
+ if(!activeChat)return setStatus("पहले बातचीत खोलें।");
+ const nextStatus=activeStatus==="closed"?"open":"closed";
+ try{
+  await api("/api/admin/support-chats/"+encodeURIComponent(activeChat)+"/status",{method:"POST",body:JSON.stringify({status:nextStatus})});
+  await loadChat(activeChat);
+  setStatus(nextStatus==="closed"?"शिकायत बंद कर दी गई; संदेश सुरक्षित हैं।":"शिकायत दोबारा खोल दी गई।");
+ }catch(e){setStatus("स्थिति नहीं बदली: "+e.message)}
+});
+$("delete").addEventListener("click",async()=>{
+ if(!activeChat)return;
+ if(!confirm("क्या आप पूरी चैट और उसके सभी संदेश स्थायी रूप से हटाना चाहते हैं? यह वापस नहीं होगा।"))return;
+ const id=activeChat;
+ try{
+  await api("/api/admin/support-chats/"+encodeURIComponent(id),{method:"DELETE"});
+  activeChat=null;$("conversation").hidden=true;$("messages").replaceChildren();
+  setStatus("चैट हटा दी गई।");await loadList();
+ }catch(e){setStatus("चैट नहीं हटाई गई: "+e.message)}
+});
+})();
+</script>
+</body>
+</html>
