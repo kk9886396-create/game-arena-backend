@@ -45,6 +45,7 @@ test("support chat message route uses transaction lock and releases client", asy
   const route = source.slice(routeStart, routeEnd);
   assert.match(route, /await client\.query\("BEGIN"\)/);
   assert.match(route, /pg_advisory_xact_lock/);
+  assert.match(route, /status='open' ORDER BY id DESC LIMIT 1 FOR UPDATE/);
   assert.match(route, /await client\.query\("COMMIT"\)/);
   assert.match(route, /await client\.query\("ROLLBACK"\)/);
   assert.match(route, /finally\s*\{\s*if\s*\(client\)\s*client\.release\(\)/);

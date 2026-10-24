@@ -113,7 +113,7 @@ function registerSupportChatRoutes(app, options) {
       );
 
       let result = await client.query(
-        "SELECT id FROM support_chats WHERE resume_token=$1 AND status='open' ORDER BY id DESC LIMIT 1",
+        "SELECT id FROM support_chats WHERE resume_token=$1 AND status='open' ORDER BY id DESC LIMIT 1 FOR UPDATE",
         [token]
       );
 
