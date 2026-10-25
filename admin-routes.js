@@ -4,7 +4,7 @@ const crypto = require("crypto");
 
 module.exports = function (
   app,
-  { getPendingPayments, reviewPayment, getPendingWithdrawals, getApprovedWithdrawals, reviewWithdrawal, markWithdrawalPaid, sendWithdrawalMessage, io }
+  { getPendingPayments, reviewPayment, getPendingWithdrawals, getApprovedWithdrawals, reviewWithdrawal, markWithdrawalPaid, sendWithdrawalMessage, io, getRecentLogs }
 ) {
   function requireAdmin(req, res, next) {
     const expected = process.env.ADMIN_TOKEN;
@@ -135,6 +135,11 @@ module.exports = function (
     }
   });
 
+
+  app.get("/api/admin/logs", requireAdmin, (req, res) => {
+    const logs = typeof getRecentLogs === "function" ? getRecentLogs() : [];
+    return res.json({ ok: true, logs });
+  });
 
   app.post("/api/admin/notifications", requireAdmin, (req, res) => {
     const message = String(req.body?.message || "").trim();
