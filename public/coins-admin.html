@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Game Arena - Coins Admin</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;padding:16px;font:16px system-ui;background:#101426;color:#f5f6ff}
+main{max-width:760px;margin:auto}
+.panel{background:#1b2340;border:1px solid #394568;border-radius:14px;padding:16px;margin:12px 0}
+input,textarea,button,select{font:inherit;padding:11px;border-radius:8px;border:1px solid #65739a}
+input,textarea,select{width:100%;background:#101426;color:white;margin:5px 0 10px}
+button{cursor:pointer;background:#ffc857;color:#171717;font-weight:700;margin:4px 3px 4px 0}
+button.secondary{background:#dbe4ff}
+button.danger{background:#ffb4ab}
+button:disabled{opacity:.5;cursor:not-allowed}
+.small{color:#c3cbe2;font-size:14px}
+.item{padding:12px;margin:8px 0;background:#101426;border:1px solid #394568;border-radius:8px}
+.item button{width:100%;margin-top:8px}
+#status{white-space:pre-wrap;overflow-wrap:anywhere}
+#balance{font-size:25px;font-weight:800;color:#ffc857}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+@media(max-width:420px){.grid{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<main>
+<h1>🪙 Game Arena Coins Admin</h1>
+<p class="small">केवल अधिकृत एडमिन के लिए। अपना ADMIN_TOKEN केवल भरोसेमंद HTTPS पेज पर दर्ज करें। टोकन सेव नहीं किया जाता। हर बदलाव से पहले खिलाड़ी और रकम जाँचें।</p>
+
+<section class="panel">
+<h2>🔐 Admin प्रवेश</h2>
+<label for="token">Admin Token</label>
+<input id="token" type="password" autocomplete="off" placeholder="अपना ADMIN_TOKEN दर्ज करें">
+<button id="clear" class="secondary">टोकन साफ़ करें</button>
+<p id="status" role="status">पहले Admin Token दर्ज करें, फिर खिलाड़ी खोजें।</p>
+</section>
+
+<section class="panel">
+<h2>🔎 खिलाड़ी खोजें</h2>
+<label for="query">Player ID या खिलाड़ी का नाम</label>
+<input id="query" maxlength="40" placeholder="कम-से-कम 2 अक्षर">
+<button id="search">खिलाड़ी खोजें</button>
+<div id="results"></div>
+</section>
+
+<section class="panel" id="selected" hidden>
+<h2>👤 चुना गया खिलाड़ी</h2>
+<p id="playerName"></p>
+<p id="playerId" class="small"></p>
+<p>मौजूदा Balance</p>
+<div id="balance">—</div>
+<hr>
+<h3>Coins में बदलाव</h3>
+<label for="action">कार्रवाई</label>
+<select id="action">
+<option value="add">Coins जोड़ें</option>
+<option value="deduct">Coins घटाएँ</option>
+</select>
+<label for="amount">Coins की संख्या</label>
+<input id="amount" type="number" min="1" max="1000000000" step="1" inputmode="numeric" placeholder="जैसे 100">
+<label for="reason">कारण (ज़रूरी)</label>
+<textarea id="reason" maxlength="200" rows="3" placeholder="बदलाव का कारण लिखें"></textarea>
+<button id="submit">बदलाव लागू करें</button>
+<p class="small">हर बदलाव सर्वर पर सत्यापित होगा। Balance कम पड़ने पर deduction रद्द होगा।</p>
+</section>
+</main>
+<script>
+(function(){
+"use strict";
+const $=id=>document.getElementById(id);
+let chosen=null,busy=false;
+
+function status(message){$("status").textContent=message}
+function headers(json){
+ const token=$("token").value.trim();
+ const h={"X-Admin-Token":token};
+ if(json)h["Content-Type"]="application/json";
+ return h;
+}
+async function api(path,options={}){
+ const response=await fetch(path,{
+  ...options,
+  headers:{...headers(!!options.body),...(options.headers||{})},
+  cache:"no-store"
+ });
+ let data={};
+ try{data=await response.json()}catch(_){}
+ if(!response.ok)throw new Error(data.error||("HTTP "+response.status));
+ return data;
+}
+function clearSelection(){
+ chosen=null;
+ $("selected").hidden=true;
+}
+function selectPlayer(p){
+ chosen=p;
+ $("playerName").textContent=p.playerName||"खिलाड़ी";
+ $("playerId").textContent="Player ID: "+p.playerId;
+ $("balance").textContent=String(p.balance)+" coins";
+ $("selected").hidden=false;
+ status("खिलाड़ी चुना गया। बदलाव से पहले ID और balance जाँचें।");
+ $("selected").scrollIntoView({behavior:"smooth",block:"start"});
+}
+$("search").addEventListener("click",async()=>{
+ if(busy)return;
+ const q=$("query").value.trim();
+ if($("token").value.trim().length===0){status("पहले Admin Token दर्ज करें।");return}
+ if(q.length<2||q.length>40){status("खोज के लिए 2 से 40 अक्षर लिखें।");return}
+ busy=true;$("search").disabled=true;
+ $("results").replaceChildren();clearSelection();
+ try{
+  const data=await api("/api/admin/coins/players?q="+encodeURIComponent(q));
+  if(!Array.isArray(data.players)||data.players.length===0){
+   $("results").textContent="कोई खिलाड़ी नहीं मिला।";
+  }else{
+   data.players.forEach(p=>{
+    const item=document.createElement("div");item.className="item";
+    const info=document.createElement("div");
+    info.textContent=(p.playerName||"खिलाड़ी")+" · ID "+p.playerId;
+    const bal=document.createElement("p");bal.className="small";
+    bal.textContent="Balance: "+p.balance+" coins";
+    const choose=document.createElement("button");
+    choose.className="secondary";choose.textContent="यह खिलाड़ी चुनें";
+    choose.addEventListener("click",()=>selectPlayer(p));
+    item.append(info,bal,choose);$("results").append(item);
+   });
+  }
+  status("खोज पूरी हुई। "+data.players.length+" परिणाम।");
+ }catch(e){status("खोज विफल: "+e.message)}
+ finally{busy=false;$("search").disabled=false}
+});
+$("submit").addEventListener("click",async()=>{
+ if(busy)return;
+ if(!chosen){status("पहले खिलाड़ी चुनें।");return}
+ const action=$("action").value;
+ const amount=Number($("amount").value);
+ const reason=$("reason").value.trim();
+ if(!Number.isSafeInteger(amount)||amount<1||amount>1000000000){
+  status("Coins की संख्या 1 से 1000000000 के बीच पूर्णांक होनी चाहिए।");return;
+ }
+ if(reason.length<3||reason.length>200){
+  status("कारण कम-से-कम 3 और अधिकतम 200 अक्षर का लिखें।");return;
+ }
+ const verb=action==="add"?"जोड़ने":"घटाने";
+ if(!confirm("Player ID: "+chosen.playerId+"\nमौजूदा Balance: "+chosen.balance+"\n"+amount+" coins "+verb+" हैं।\nकारण: "+reason+"\n\nक्या आप निश्चित हैं?"))return;
+ busy=true;$("submit").disabled=true;
+ try{
+  const data=await api("/api/admin/coins/adjust",{
+   method:"POST",
+   body:JSON.stringify({playerId:chosen.playerId,action,amount,reason})
+  });
+  chosen.balance=String(data.balance);
+  $("balance").textContent=String(data.balance)+" coins";
+  $("amount").value="";$("reason").value="";
+  status("सफलता: "+amount+" coins "+(action==="add"?"जोड़े गए।":"घटाए गए।")+"\nPlayer ID: "+chosen.playerId+"\nनया Balance: "+data.balance);
+  $("results").replaceChildren();
+ }catch(e){status("बदलाव पूरा नहीं हुआ: "+e.message)}
+ finally{busy=false;$("submit").disabled=false}
+});
+$("clear").addEventListener("click",()=>{
+ $("token").value="";
+ $("results").replaceChildren();
+ clearSelection();
+ status("टोकन साफ़ कर दिया गया।");
+});
+})();
+</script>
+</body>
+</html>
