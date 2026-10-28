@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Game Arena - Payment QR Admin</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;padding:20px;background:#10131d;color:#f4f4f4;font-family:Arial,sans-serif}
+main{max-width:520px;margin:20px auto;background:#1b2030;padding:22px;border:1px solid #b99645;border-radius:16px}
+h1{font-size:23px;color:#e8c56a}
+p{line-height:1.5;color:#d0d4df}
+label{display:block;margin:16px 0 7px}
+input,button{width:100%;padding:12px;border-radius:9px;font-size:16px}
+input{background:#10131d;color:white;border:1px solid #596176}
+button{margin-top:14px;background:#d8b456;color:#171717;border:0;font-weight:bold}
+button:disabled{opacity:.5}
+#preview{display:block;max-width:100%;max-height:340px;object-fit:contain;margin:16px auto;background:white;border-radius:8px}
+#status{white-space:pre-wrap;overflow-wrap:anywhere}
+.note{font-size:13px;color:#aeb6c8}
+</style>
+</head>
+<body>
+<main>
+<h1>Game Arena — UPI QR Admin</h1>
+<p>यहाँ से खिलाड़ियों के Wallet में दिखने वाला QR सेट या बदला जा सकता है।</p>
+
+<label for="token">Admin Token</label>
+<input id="token" type="password" autocomplete="off" placeholder="Admin token दर्ज करें">
+
+<label for="file">नई QR image चुनें</label>
+<input id="file" type="file" accept="image/png,image/jpeg,image/webp">
+
+<img id="preview" alt="QR preview" hidden>
+<p id="status" role="status">वर्तमान QR लोड हो रहा है…</p>
+<p class="note">केवल PNG, JPEG या WebP; अधिकतम 512 KB। Token इस पेज में सेव नहीं किया जाता।</p>
+
+<button id="load" type="button">वर्तमान QR फिर से देखें</button>
+<button id="save" type="button" disabled>QR सेव करें / पुराना बदलें</button>
+</main>
+
+<script>
+(function(){
+const token=document.getElementById("token");
+const file=document.getElementById("file");
+const preview=document.getElementById("preview");
+const status=document.getElementById("status");
+const save=document.getElementById("save");
+let localPreviewUrl=null;
+
+function showStatus(message){status.textContent=message;}
+
+function showImage(url){
+preview.src=url;
+preview.hidden=false;
+}
+
+async function loadCurrent(){
+showStatus("वर्तमान QR लोड हो रहा है…");
+try{
+const response=await fetch("/api/payment-qr",{cache:"no-store"});
+if(!response.ok){
+preview.hidden=true;
+showStatus(response.status===404
+?"अभी कोई QR सेव नहीं है। नई image चुनकर सेव करें।"
+:"QR लोड नहीं हुआ (HTTP "+response.status+")");
+return;
+}
+const blob=await response.blob();
+if(localPreviewUrl){URL.revokeObjectURL(localPreviewUrl);localPreviewUrl=null;}
+showImage(URL.createObjectURL(blob));
+showStatus("वर्तमान सेव किया हुआ QR दिख रहा है।");
+}catch(e){
+showStatus("QR लोड नहीं हुआ। Server connection जाँचें।");
+}
+}
+
+file.addEventListener("change",function(){
+const selected=file.files&&file.files[0];
+save.disabled=!selected;
+if(!selected)return;
+if(!["image/png","image/jpeg","image/webp"].includes(selected.type)){
+save.disabled=true;
+showStatus("गलत image type। PNG, JPEG या WebP चुनें।");
+file.value="";
+return;
+}
+if(selected.size>512*1024){
+save.disabled=true;
+showStatus("Image 512 KB से बड़ी है। छोटी image चुनें।");
+file.value="";
+return;
+}
+if(localPreviewUrl)URL.revokeObjectURL(localPreviewUrl);
+localPreviewUrl=URL.createObjectURL(selected);
+showImage(localPreviewUrl);
+showStatus("Preview तैयार है। सेव करने के लिए Admin Token दर्ज करें।");
+});
+
+document.getElementById("load").addEventListener("click",loadCurrent);
+
+save.addEventListener("click",async function(){
+const selected=file.files&&file.files[0];
+const adminToken=token.value.trim();
+if(!adminToken){showStatus("पहले Admin Token दर्ज करें।");return;}
+if(!selected){showStatus("पहले QR image चुनें।");return;}
+
+save.disabled=true;
+showStatus("QR सेव हो रहा है…");
+try{
+const response=await fetch("/api/admin/payment-qr",{
+method:"POST",
+headers:{
+"X-Admin-Token":adminToken,
+"Content-Type":selected.type
+},
+body:selected
+});
+const result=await response.json().catch(()=>({}));
+if(!response.ok){
+showStatus("QR सेव नहीं हुआ (HTTP "+response.status+"): "+(result.error||"कृपया जाँचें"));
+return;
+}
+file.value="";
+if(localPreviewUrl){URL.revokeObjectURL(localPreviewUrl);localPreviewUrl=null;}
+showStatus("QR सफलतापूर्वक सेव हो गया। खिलाड़ियों को यही QR दिखेगा।");
+await loadCurrent();
+}catch(e){
+showStatus("Upload असफल। Server connection जाँचें।");
+}finally{
+save.disabled=!(file.files&&file.files[0]);
+}
+}
+
+);
+loadCurrent();
+})();
+</script>
+</body>
+</html>
