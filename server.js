@@ -15,7 +15,7 @@ const { createWithdrawal } = require("./withdraw-create");
 const { getPendingWithdrawals, reviewWithdrawal } = require("./withdraw-review");
 const { getApprovedWithdrawals } = require("./approved-withdrawals");
 const { markWithdrawalPaid } = require("./withdraw-paid");
-app.use(express.json());app.use(express.static("public"));app.get("/api/health",(_,r)=>r.json({ok:true,rooms:rooms.size}));
+app.use(require("cors")({origin:process.env.CORS_ORIGIN||"*",methods:["GET","POST","OPTIONS"],allowedHeaders:["Content-Type","X-Admin-Token","X-Resume-Token"]}));app.use(express.json());app.use(express.static("public"));app.get("/api/health",(_,r)=>r.json({ok:true,rooms:rooms.size}));
 require("./admin-coins")(app);
 require("./admin-routes")(app, { getPendingPayments, reviewPayment, getPendingWithdrawals, getApprovedWithdrawals, reviewWithdrawal, markWithdrawalPaid, sendWithdrawalMessage, io, getRecentLogs: adminLogBuffer.recent });
 require("./player-withdrawal-messages")(app, getProfile, getPlayerWithdrawalMessages);
