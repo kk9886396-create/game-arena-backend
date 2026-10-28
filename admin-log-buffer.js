@@ -4,8 +4,8 @@ const LIMIT = 100;
 
 function add(event) {
 const safeEvent = String(event)
-.replace(/[^a-zA-Z0-9 _:-]/g, "")
-.slice(0, 80);
+.replace(/[^a-zA-Z0-9 _:\-|]/g, "")
+.slice(0, 160);
 
 entries.push({
 time: new Date().toISOString(),
