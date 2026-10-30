@@ -6,10 +6,10 @@ const rooms=new Map(),sessions=new Map(),resumeSessions=new Map(),colors=["red",
 const waiting=[];
 const { nextPosition } = require("./ludo-rules");
 const { makePlayerId, makeReferralCode } = require("./profile-feature");
-const { initProfileDB, saveProfile, getProfile } = require("./profile-db");
+const { initProfileDB, saveProfile, getProfile, findProfileByReferralCode } = require("./profile-db");
 const { initSupportChatDB, registerSupportChatRoutes } = require("./support-chat");
 const { initPaymentQrDB, registerPaymentQrRoutes } = require("./payment-qr");
-const { initWalletDB, getWallet, getWalletTransactions, createPaymentRequest, getPendingPayments, reviewPayment } = require("./wallet-db");
+const { initWalletDB, getWallet, getWalletTransactions, createPaymentRequest, getPendingPayments, reviewPayment, recordReferralWin, migrateReferralIncomeToWallet, getReferralIncomeTotal } = require("./wallet-db");
 const { initWithdrawDB } = require("./withdraw-db");
 const { initWithdrawalMessagesDB, sendWithdrawalMessage, getPlayerWithdrawalMessages } = require("./withdrawal-messages");
 const { createWithdrawal } = require("./withdraw-create");
@@ -22,7 +22,7 @@ require("./admin-routes")(app, { getPendingPayments, reviewPayment, getPendingWi
 require("./player-withdrawal-messages")(app, getProfile, getPlayerWithdrawalMessages);
 registerSupportChatRoutes(app, { pool: require("./profile-db").pool, getProfile, io, sessions });
 registerPaymentQrRoutes(app, require("./profile-db").pool);
-app.post("/api/wallet/withdraw-request",async(req,res)=>{const token=req.get("X-Resume-Token");if(!token||!/^[a-f0-9]{64}$/.test(token))return res.status(401).json({ok:false,error:"Invalid token"});const amount=Number(req.body?.amount);if(!Number.isSafeInteger(amount)||amount<1||amount>50000)return res.status(400).json({ok:false,error:"Invalid amount"});try{if(!await getProfile(token))return res.status(401).json({ok:false,error:"Profile not found"});const request=await createWithdrawal(token,amount);return res.status(201).json({ok:true,request});}catch(e){if(e.message==="Insufficient wallet balance"||e.message==="Invalid withdrawal amount")return res.status(400).json({ok:false,error:e.message});console.error("Withdrawal request error:",e.message);return res.status(500).json({ok:false,error:"Withdrawal request unavailable"});}});app.get("/api/wallet",async(req,res)=>{const token=req.get("X-Resume-Token");if(!token||!/^[a-f0-9]{64}$/.test(token))return res.status(401).json({ok:false,error:"Invalid token"});try{const profile=await getProfile(token);if(!profile)return res.status(401).json({ok:false,error:"Profile not found"});const wallet=await getWallet(token);return res.json({ok:true,balance:String(wallet.balance)});}catch(e){console.error("Wallet API error:",e.message);return res.status(500).json({ok:false,error:"Wallet unavailable"});}});
+app.post("/api/wallet/withdraw-request",async(req,res)=>{const token=req.get("X-Resume-Token");if(!token||!/^[a-f0-9]{64}$/.test(token))return res.status(401).json({ok:false,error:"Invalid token"});const amount=Number(req.body?.amount);if(!Number.isSafeInteger(amount)||amount<1||amount>50000)return res.status(400).json({ok:false,error:"Invalid amount"});try{if(!await getProfile(token))return res.status(401).json({ok:false,error:"Profile not found"});const request=await createWithdrawal(token,amount);return res.status(201).json({ok:true,request});}catch(e){if(e.message==="Insufficient wallet balance"||e.message==="Invalid withdrawal amount")return res.status(400).json({ok:false,error:e.message});console.error("Withdrawal request error:",e.message);return res.status(500).json({ok:false,error:"Withdrawal request unavailable"});}});app.get("/api/wallet",async(req,res)=>{const token=req.get("X-Resume-Token");if(!token||!/^[a-f0-9]{64}$/.test(token))return res.status(401).json({ok:false,error:"Invalid token"});try{const profile=await getProfile(token);if(!profile)return res.status(401).json({ok:false,error:"Profile not found"});await migrateReferralIncomeToWallet(token);const wallet=await getWallet(token);const referralIncome=await getReferralIncomeTotal(token);return res.json({ok:true,balance:String(wallet.balance),referralIncome:String(referralIncome)});}catch(e){console.error("Wallet API error:",e.message);return res.status(500).json({ok:false,error:"Wallet unavailable"});}});
 app.get("/api/wallet/transactions",async(req,res)=>{const token=req.get("X-Resume-Token");if(!token||!/^[a-f0-9]{64}$/.test(token))return res.status(401).json({ok:false,error:"Invalid token"});try{const profile=await getProfile(token);if(!profile)return res.status(401).json({ok:false,error:"Profile not found"});const transactions=await getWalletTransactions(token);return res.json({ok:true,transactions});}catch(e){console.error("Wallet history API error:",e.message);return res.status(500).json({ok:false,error:"Wallet history unavailable"});}});
 app.post("/api/wallet/payment-request",async(req,res)=>{
 const token=req.get("X-Resume-Token");
@@ -39,17 +39,94 @@ return res.status(201).json({ok:true,request});
 function code(){let c;do{c=crypto.randomBytes(3).toString("hex").toUpperCase()}while(rooms.has(c));return c}
 function view(r){return {code:r.code,players:r.players.map((p,i)=>({name:p.name,color:colors[i],connected:p.connected})),state:r.state}}
 function emit(r){io.to(r.code).emit("room:update",view(r))}
-const autoTurn=require("./auto-turn")(io,rooms,colors,emit);
+const autoTurn=require("./auto-turn")(io,rooms,colors,emit,(r,c)=>{if(!r||r.mode!=="classic")return;const winner=r.players[colors.indexOf(c)];if(winner&&winner.token)recordReferralWin(winner.token,String(r.code),"classic").catch(err=>console.error("Auto referral win recording failed:",err.message));});
 require("./open-battles-new")(io,sessions,rooms,colors,code,view,emit,autoTurn);
 io.on("connection",s=>{
  let logUser=sessions.get(s.id);adminLogBuffer.add(logUser?"Player connected | Name: "+String(logUser.name||"Unknown")+" | ID: "+String(logUser.playerId||"Unknown"):"Player connected | Player not registered yet");
  require("./auto-match")(s,io,sessions,rooms,waiting,colors,code,view,emit,autoTurn.start);
  s.on("room:create",()=>adminLogBuffer.add("Room create requested"));
- s.on("player:register",async (d,a=()=>{})=>{let name=String(d?.name||"").trim().slice(0,24),token=String(d?.resumeToken||"");if(token&&!resumeSessions.has(token)&&process.env.DATABASE_URL){const saved=await getProfile(token);if(saved){const u={name:saved.name,room:null,token,playerId:saved.playerId,referralCode:saved.referralCode};resumeSessions.set(token,u);sessions.set(s.id,u);adminLogBuffer.add("Player registered | Name: "+String(u.name||"Unknown")+" | ID: "+String(u.playerId||"Unknown"));return a({ok:true,name:u.name,token,playerId:u.playerId,referralCode:u.referralCode,resumed:true})}}if(token&&resumeSessions.has(token)){let u=resumeSessions.get(token);u.playerId=u.playerId||makePlayerId();u.referralCode=u.referralCode||makeReferralCode();sessions.set(s.id,u);if(u.room){let r=rooms.get(u.room),p=r&&r.players.find(x=>x.token===token);if(p){p.id=s.id;p.connected=true;s.join(r.code);r.state.message=u.name+" फिर से जुड़ गया";emit(r);adminLogBuffer.add("Player registered | Name: "+String(u.name||"Unknown")+" | ID: "+String(u.playerId||"Unknown"));return a({ok:true,name:u.name,token,playerId:u.playerId,referralCode:u.referralCode,room:view(r),resumed:true})}u.room=null}adminLogBuffer.add("Player registered | Name: "+String(u.name||"Unknown")+" | ID: "+String(u.playerId||"Unknown"));return a({ok:true,name:u.name,token,playerId:u.playerId,referralCode:u.referralCode,resumed:false})}if(name.length<2)return a({ok:false,error:"नाम कम से कम 2 अक्षर का हो"});token=crypto.randomBytes(32).toString("hex");let u={name,room:null,token,playerId:makePlayerId(),referralCode:makeReferralCode()};sessions.set(s.id,u);resumeSessions.set(token,u);if(process.env.DATABASE_URL){try{const saved=await saveProfile({token,name,playerId:u.playerId,referralCode:u.referralCode});u.playerId=saved.player_id;u.referralCode=saved.referral_code}catch(err){console.error("Profile save failed:",err.message);return a({ok:false,error:"प्रोफाइल सेव नहीं हो सकी। फिर कोशिश करें।"})}}adminLogBuffer.add("Player registered | Name: "+String(u.name||"Unknown")+" | ID: "+String(u.playerId||"Unknown"));a({ok:true,name,token,playerId:u.playerId,referralCode:u.referralCode})});
- s.on("room:create",(_,a=()=>{})=>{let u=sessions.get(s.id);if(!u)return a({ok:false,error:"पहले नाम दर्ज करें"});if(u.room)return a({ok:false,error:"आप पहले से रूम में हैं"});let c=code(),r={code:c,players:[{id:s.id,name:u.name,token:u.token,connected:true}],state:{turn:0,dice:null,winner:null,pawns:{red:[-1,-1,-1,-1],green:[-1,-1,-1,-1]},message:"लाल खिलाड़ी पहले चलेगा"}};rooms.set(c,r);u.room=c;s.join(c);a({ok:true,room:view(r)});emit(r)});
+
+ s.on("player:register", async (d, a = () => {}) => {
+   let name = String(d?.name || "").trim().slice(0, 24);
+   let token = String(d?.resumeToken || "");
+   if (token && !resumeSessions.has(token) && process.env.DATABASE_URL) {
+     let saved;
+     try {
+       saved = await getProfile(token);
+     } catch (err) {
+       console.error("Profile resume lookup failed:", err.message);
+       return a({ ok: false, error: "प्रोफाइल जाँची नहीं जा सकी। फिर कोशिश करें।" });
+     }
+     if (saved) {
+       const u = { name: saved.name, room: null, token, playerId: saved.playerId, referralCode: saved.referralCode };
+       resumeSessions.set(token, u);
+       sessions.set(s.id, u);
+       adminLogBuffer.add("Player registered | Name: " + String(u.name || "Unknown") + " | ID: " + String(u.playerId || "Unknown"));
+       return a({ ok: true, name: u.name, token, playerId: u.playerId, referralCode: u.referralCode, resumed: true });
+     }
+     return a({ ok: false, error: "पुराना session नहीं मिला। फिर से login करें।" });
+   }
+   if (token && resumeSessions.has(token)) {
+     let u = resumeSessions.get(token);
+     u.playerId = u.playerId || makePlayerId();
+     u.referralCode = u.referralCode || makeReferralCode();
+     sessions.set(s.id, u);
+     if (u.room) {
+       let r = rooms.get(u.room), p = r && r.players.find(x => x.token === token);
+       if (p) {
+         p.id = s.id;
+         p.connected = true;
+         s.join(r.code);
+         r.state.message = u.name + " फिर से जुड़ गया";
+         emit(r);
+         adminLogBuffer.add("Player registered | Name: " + String(u.name || "Unknown") + " | ID: " + String(u.playerId || "Unknown"));
+         return a({ ok: true, name: u.name, token, playerId: u.playerId, referralCode: u.referralCode, room: view(r), resumed: true });
+       }
+       u.room = null;
+     }
+     adminLogBuffer.add("Player registered | Name: " + String(u.name || "Unknown") + " | ID: " + String(u.playerId || "Unknown"));
+     return a({ ok: true, name: u.name, token, playerId: u.playerId, referralCode: u.referralCode, resumed: false });
+   }
+   if (name.length < 2) return a({ ok: false, error: "नाम कम से कम 2 अक्षर का हो" });
+   const referralCodeInput = String(d?.referralCode || "").trim().toUpperCase();
+   let referrer = null;
+   if (referralCodeInput) {
+     if (!process.env.DATABASE_URL) return a({ ok: false, error: "Referral code जाँचने के लिए database उपलब्ध नहीं है" });
+     try {
+       referrer = await findProfileByReferralCode(referralCodeInput);
+     } catch (err) {
+       console.error("Referral lookup failed:", err.message);
+       return a({ ok: false, error: "Referral code जाँचा नहीं जा सका। फिर कोशिश करें।" });
+     }
+     if (!referrer) return a({ ok: false, error: "Referral Code सही नहीं है" });
+   }
+   token = crypto.randomBytes(32).toString("hex");
+   let u = { name, room: null, token, playerId: makePlayerId(), referralCode: makeReferralCode() };
+   if (process.env.DATABASE_URL) {
+     try {
+       const saved = await saveProfile({
+         token, name, playerId: u.playerId, referralCode: u.referralCode,
+         referredBy: referrer ? referrer.token : null
+       });
+       u.playerId = saved.player_id;
+       u.referralCode = saved.referral_code;
+     } catch (err) {
+       console.error("Profile save failed:", err.message);
+       sessions.delete(s.id);
+       resumeSessions.delete(token);
+       return a({ ok: false, error: "प्रोफाइल सेव नहीं हो सकी। फिर कोशिश करें।" });
+     }
+   }
+   sessions.set(s.id, u);
+   resumeSessions.set(token, u);
+   adminLogBuffer.add("Player registered | Name: " + String(u.name || "Unknown") + " | ID: " + String(u.playerId || "Unknown"));
+   return a({ ok: true, name, token, playerId: u.playerId, referralCode: u.referralCode });
+ });
+
+ s.on("room:create",(_,a=()=>{})=>{let u=sessions.get(s.id);if(!u)return a({ok:false,error:"पहले नाम दर्ज करें"});if(u.room)return a({ok:false,error:"आप पहले से रूम में हैं"});let c=code(),r={code:c,mode:"classic",players:[{id:s.id,name:u.name,token:u.token,connected:true}],state:{turn:0,dice:null,winner:null,pawns:{red:[-1,-1,-1,-1],green:[-1,-1,-1,-1]},message:"लाल खिलाड़ी पहले चलेगा"}};rooms.set(c,r);u.room=c;s.join(c);a({ok:true,room:view(r)});emit(r)});
  s.on("room:join",(d,a=()=>{})=>{let u=sessions.get(s.id),r=rooms.get(String(d?.code||"").toUpperCase());if(!u)return a({ok:false,error:"पहले नाम दर्ज करें"});if(!r)return a({ok:false,error:"रूम नहीं मिला"});if(r.players.length>1)return a({ok:false,error:"रूम भरा हुआ है"});if(u.room)return a({ok:false,error:"आप पहले से रूम में हैं"});r.players.push({id:s.id,name:u.name,token:u.token,connected:true});u.room=r.code;s.join(r.code);r.state.message="दोनों खिलाड़ी जुड़ गए।";a({ok:true,room:view(r)});autoTurn.start(r)});
  s.on("game:roll",(_,a=()=>{})=>{let u=sessions.get(s.id),r=u&&rooms.get(u.room);if(!r||r.players.length!==2)return a({ok:false,error:"दूसरे खिलाड़ी का इंतज़ार करें"});let i=r.players.findIndex(p=>p.id===s.id);if(i!==r.state.turn)return a({ok:false,error:"अभी आपकी बारी नहीं"});if(r.state.dice!==null)return a({ok:false,error:"पहले गोटी चलाएँ"});r.state.dice=crypto.randomInt(1,7);let c=colors[i],hasMove=r.state.pawns[c].some(pos=>pos>=0&&pos<52)||r.state.dice===6;if(!hasMove){let rolled=r.state.dice;r.state.dice=null;r.state.turn=1-r.state.turn;r.state.message="पासा "+rolled+" आया। कोई गोटी नहीं चल सकती, अब दूसरे खिलाड़ी की बारी है।";autoTurn.start(r);return a({ok:true,dice:rolled,skipped:true})}r.state.message="पासा आया: "+r.state.dice;emit(r);a({ok:true,dice:r.state.dice})});
- s.on("game:move",(d,a=()=>{})=>{let u=sessions.get(s.id),r=u&&rooms.get(u.room);if(!r||r.players.length!==2)return a({ok:false,error:"रूम उपलब्ध नहीं"});let st=r.state,i=r.players.findIndex(p=>p.id===s.id),c=colors[i],p=Number(d?.pawn);if(i!==st.turn)return a({ok:false,error:"अभी आपकी बारी नहीं"});if(st.dice===null)return a({ok:false,error:"पहले पासा चलाएँ"});if(!Number.isInteger(p)||p<0||p>3)return a({ok:false,error:"गोटी चुनें"});let pos=st.pawns[c][p],rule=nextPosition(pos,st.dice);if(!rule.ok)return a({ok:false,error:rule.error});let n=rule.next;if(n<0)return a({ok:false,error:"गोटी निकालने के लिए 6 चाहिए"});if(n>52)return a({ok:false,error:"घर तक पहुँचने के लिए सही अंक चाहिए"});st.pawns[c][p]=n;let die=st.dice;st.dice=null;if(st.pawns[c].every(x=>x===52)){st.winner=c;st.message=c+" खिलाड़ी जीत गया"}else{st.message=c+" ने गोटी "+(p+1)+" चलाई";if(die!==6)st.turn=1-st.turn}emit(r);autoTurn.start(r);a({ok:true})});
+ s.on("game:move",(d,a=()=>{})=>{let u=sessions.get(s.id),r=u&&rooms.get(u.room);if(!r||r.players.length!==2)return a({ok:false,error:"रूम उपलब्ध नहीं"});let st=r.state;if(st.winner)return a({ok:false,error:"मैच समाप्त हो चुका है"});let i=r.players.findIndex(p=>p.id===s.id),c=colors[i],p=Number(d?.pawn);if(i!==st.turn)return a({ok:false,error:"अभी आपकी बारी नहीं"});if(st.dice===null)return a({ok:false,error:"पहले पासा चलाएँ"});if(!Number.isInteger(p)||p<0||p>3)return a({ok:false,error:"गोटी चुनें"});let pos=st.pawns[c][p],rule=nextPosition(pos,st.dice);if(!rule.ok)return a({ok:false,error:rule.error});let n=rule.next;if(n<0)return a({ok:false,error:"गोटी निकालने के लिए 6 चाहिए"});if(n>52)return a({ok:false,error:"घर तक पहुँचने के लिए सही अंक चाहिए"});st.pawns[c][p]=n;let die=st.dice;st.dice=null;if(st.pawns[c].every(x=>x===52)){st.winner=c;st.message=c+" खिलाड़ी जीत गया";if(r.mode==="classic"&&r.players[i]?.token){recordReferralWin(r.players[i].token,r.code,"classic").catch(err=>console.error("Referral win recording failed:",err.message))}}else{st.message=c+" ने गोटी "+(p+1)+" चलाई";if(die!==6)st.turn=1-st.turn}emit(r);autoTurn.start(r);a({ok:true})});
  s.on("disconnect",()=>{let logUser=sessions.get(s.id);adminLogBuffer.add(logUser?"Player disconnected | Name: "+String(logUser.name||"Unknown")+" | ID: "+String(logUser.playerId||"Unknown"):"Player disconnected | Player not registered");let u=sessions.get(s.id),r=u&&rooms.get(u.room);if(r){let p=r.players.find(x=>x.id===s.id);if(p)p.connected=false;r.state.message=u.name+" डिस्कनेक्ट हुआ";emit(r)}for(let i=waiting.length-1;i>=0;i--)if(waiting[i]===s.id)waiting.splice(i,1);sessions.delete(s.id)});
 });
 if(process.env.DATABASE_URL){initProfileDB().then(()=>initWalletDB()).then(()=>initWithdrawDB()).then(()=>initWithdrawalMessagesDB()).then(()=>initSupportChatDB(require("./profile-db").pool)).then(()=>initPaymentQrDB(require("./profile-db").pool)).then(()=>server.listen(PORT,"0.0.0.0",()=>console.log("Game Arena server ready"))).catch(err=>{console.error("Profile DB init failed:",err.message);process.exit(1)})}else{server.listen(PORT,"0.0.0.0",()=>console.log("Game Arena: http://localhost:"+PORT))}
