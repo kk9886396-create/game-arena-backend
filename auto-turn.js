@@ -1,4 +1,4 @@
-module.exports = function (io, rooms, colors, emit) {
+module.exports = function (io, rooms, colors, emit, onWinner = () => {}) {
   const { nextPosition } = require("./ludo-rules");
   const timers = new Map();
 
@@ -37,6 +37,7 @@ module.exports = function (io, rooms, colors, emit) {
         if (pawns.every(x => x === 52)) {
           st.winner = c;
           st.message = c + " खिलाड़ी जीत गया (ऑटो चाल)";
+              if (r.mode === "classic") onWinner(r, c);
         } else {
           st.message = "समय पूरा! " + c + " की गोटी " + (chosen.p + 1) + " अपने-आप चली।";
           if (die !== 6) st.turn = 1 - st.turn;

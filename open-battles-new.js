@@ -45,7 +45,7 @@ module.exports = function(io, sessions, rooms, colors, code, view, emit, autoTur
       if(b.ownerToken===u.token) return ack({ok:false,error:"अपने Battle में दूसरा खिलाड़ी जुड़ने दें"});
       const os=io.sockets.sockets.get(b.ownerId), v=os && sessions.get(b.ownerId);
       if(!os || !v || v.token!==b.ownerToken || v.room) return ack({ok:false,error:"Battle बनाने वाला खिलाड़ी उपलब्ध नहीं है"});
-      const c=code(),r={code:c,players:[{id:os.id,name:v.name,token:v.token,connected:true},{id:socket.id,name:u.name,token:u.token,connected:true}],state:{turn:0,dice:null,winner:null,pawns:{red:[-1,-1,-1,-1],green:[-1,-1,-1,-1]},message:"दोनों खिलाड़ी जुड़ गए। लाल खिलाड़ी पहले चलेगा"}};
+      const c=code(),r={code:c,mode:"open-battle",players:[{id:os.id,name:v.name,token:v.token,connected:true},{id:socket.id,name:u.name,token:u.token,connected:true}],state:{turn:0,dice:null,winner:null,pawns:{red:[-1,-1,-1,-1],green:[-1,-1,-1,-1]},message:"दोनों खिलाड़ी जुड़ गए। लाल खिलाड़ी पहले चलेगा"}};
       rooms.set(c,r);v.room=c;u.room=c;os.join(c);socket.join(c);battles.delete(b.id);publish();emit(r);autoTurn.start(r);ack({ok:true,room:view(r)});
     });
   });
